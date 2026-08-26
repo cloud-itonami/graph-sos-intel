@@ -1,6 +1,29 @@
 {
+  // NOTE: this app used to be built by SvelteKit's @sveltejs/adapter-cloudflare,
+  // which emitted both a server-rendering Worker script (`main`, the deployed
+  // XRPC handler at svelte/src/routes/xrpc/[...path]/+server.ts) and a static
+  // client bundle (`assets.directory`, the +page.svelte status page). The
+  // frontend was migrated to a plain ClojureScript (shadow-cljs + reagent +
+  // re-frame + jp-go-dds) static bundle with no server-rendering step — see
+  // cljs/src/graph_sos_intel/app.cljs's namespace docstring. `main` is
+  // dropped (a Cloudflare Worker can be assets-only) and `assets.directory`
+  // now points at the cljs build output.
+  //
+  // `main` is NOT repointed at either Worker source still in this repo
+  // (`src/app.ts` or the moved `src/xrpc-mcp-router-proxy.ts`): neither calls
+  // `env.ASSETS.fetch`, so putting either in front of the assets would mean
+  // nothing serves the static files. Both remain orphaned source, same as
+  // before this migration (src/app.ts was already unreferenced — its own
+  // fetch handler proxies to a separate `DISPATCHER_URL` dispatcher, it does
+  // not front the static bundle either).
+  //
+  // This edit is UNVERIFIED: neither of Cloudflare's two ways to run this
+  // config (the CLI deploy command, or its local preview equivalent) was
+  // run against it. Dropping `main` means the XRPC BFF endpoint
+  // (`src/xrpc-mcp-router-proxy.ts`, moved verbatim from the SvelteKit
+  // server route) is no longer in the deploy path — see that file's own
+  // header comment for what that means.
   "name": "kotodama-gs0s1nt7",
-  "main": "svelte/.svelte-kit/cloudflare/_worker.js",
   "compatibility_date": "2025-03-17",
   "compatibility_flags": [
     "nodejs_compat",
@@ -11,7 +34,7 @@
     "APP_DESCRIPTION": "Graph System-of-Systems intelligence actor. Continuously inventories vertex, edge, MV, and idx topology; writes auditable snapshots and findings.",
     "APP_DISPLAY_NAME": "Graph SoS Intel",
     "APP_EMBED_URL": "https://gs0s1nt7.etzhayyim.com/?embed=1",
-    "APP_FRAMEWORK": "sveltekit-edge-bff",
+    "APP_FRAMEWORK": "cljs-reagent-re-frame-jp-go-dds",
     "APP_NANOID": "gs0s1nt7",
     "APP_PERFORMER_TYPE": "",
     "APP_UI_TYPE": "appview",
@@ -32,7 +55,7 @@
     }
   ],
   "assets": {
-    "directory": "./svelte/.svelte-kit/cloudflare/client",
+    "directory": "./cljs/public",
     "binding": "ASSETS",
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "none"
