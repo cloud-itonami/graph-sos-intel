@@ -1,0 +1,326 @@
+#!/usr/bin/env nbb
+;; test/declared_surface_test.cljs — does the status page still describe THIS
+;; repository, or only the repository it was written against?
+;;
+;; This Worker is assets-only. `wrangler.jsonc` declares no `main`, so nothing
+;; runs at the edge except the static bundle under `cljs/public/`, and the only
+;; thing that bundle renders is a page about the Worker itself: its routes, its
+;; runtime bindings, whether an XRPC handler is deployed in front of the assets,
+;; and where its own source lives. Every one of those is a claim about a file
+;; sitting next to it.
+;;
+;; `cljs/src/graph_sos_intel/app.cljs`'s `default-db` holds those claims as
+;; literals, and its namespace docstring explains at length which ones were
+;; corrected during the SvelteKit → ClojureScript migration and why -- the
+;; Svelte constant it was ported from had drifted from `wrangler.jsonc` (it
+;; still said `routeCount: 0`, `routes: []`, `vars: []` next to a config that
+;; declared one route and nine vars). That drift is the failure this file is
+;; here to catch the next time, because the existing suite structurally cannot:
+;; `cljs/test/graph_sos_intel/app_test.cljs` asserts `default-db` against the
+;; same literals spelled a second time, so adding a var to `wrangler.jsonc`
+;; leaves it green while the page starts lying. A test that restates the
+;; implementation discriminates nothing.
+;;
+;; What is checked, and how each one rots on its own:
+;;
+;;   1. Routes and vars. `wrangler.jsonc` is edited when the deployment changes
+;;      -- a new binding, a moved hostname -- and nothing about that edit
+;;      reaches `default-db`. The page keeps listing yesterday's surface.
+;;
+;;   2. The XRPC flag. `:app/xrpc?` is false for exactly one reason: this
+;;      config has no `main`, so neither Worker source left in this repo
+;;      (`src/app.ts`, `src/xrpc-mcp-router-proxy.ts`) is in the deploy path.
+;;      Re-adding `main` is the single edit that makes the page's "not
+;;      configured" wrong, and it is an edit someone will make from the other
+;;      end -- reviving the BFF -- without opening a ClojureScript file.
+;;
+;;   3. Its own source path. `:app/relative-path` is displayed as fact. It was
+;;      already stale when this migration found it: it named a path inside the
+;;      etzhayyim/root monorepo this repo was extracted from. A repo-relative
+;;      path that names nothing is the same bug, one rename later.
+;;
+;;   4. The shell reaches the bundle. An assets-only Worker serves
+;;      `cljs/public/index.html`, whose `<script src>` and mount `<div id>`
+;;      were written by hand against shadow-cljs's `:asset-path` / module name
+;;      and the id `render` calls `getElementById` with. Rename the module in
+;;      `shadow-cljs.edn` and the page still loads, still styles, and shows
+;;      "loading…" forever -- a 404 on a script tag is not an error anyone is
+;;      told about, and every ClojureScript unit test stays green because the
+;;      code under test compiled fine.
+;;
+;; Not checked: whether `:app/title` agrees with `APP_DISPLAY_NAME`. It does
+;; not -- the page says "Ai etzhayyim Project Graph Sos Intel" and the config
+;; says "Graph SoS Intel" -- and deciding which is right is a product question,
+;; not a drift. Asserting a relation that does not hold today would make this
+;; file red on arrival and teach the next reader to ignore it.
+;;
+;; ## Exit codes -- "could not measure" is not "measured clean"
+;;
+;;   0  every invariant held, on a non-empty configuration
+;;   1  an invariant was violated (the message names which)
+;;   2  REFUSED -- an input could not be read, so no claim is made
+;;
+;; Exit 2 is not decoration. The cheapest way to write this check wrong is to
+;; let a missing or unparseable `wrangler.jsonc` fall through to the same
+;; comparisons a good one takes and print OK: an empty `vars` map and an empty
+;; `routes` array satisfy the equalities below by being empty on both sides.
+;; Emptiness is refused before the equalities are reached, not after.
+;;
+;; Nothing here touches the network, npm, a JVM, or a browser.
+;;
+;; Usage:  nbb test/declared_surface_test.cljs
+
+(ns declared-surface-test
+  (:require ["node:fs" :as fs]
+            ["node:path" :as path]
+            [cljs.reader :as reader]
+            [clojure.string :as str]))
+
+(def root
+  (path/resolve (path/dirname (or js/__filename "test/declared_surface_test.cljs")) ".."))
+
+(def app-rel "cljs/src/graph_sos_intel/app.cljs")
+(def shadow-rel "cljs/shadow-cljs.edn")
+(def wrangler-rel "wrangler.jsonc")
+(def shell-rel "cljs/public/index.html")
+
+(def failures (atom []))
+(defn- fail! [invariant detail]
+  (swap! failures conj (str "FAIL " invariant ": " detail)))
+
+(defn- refuse! [why]
+  (println (str "REFUSED " why))
+  (println "declared-surface-check: no claim made — the inputs could not be read.")
+  (js/process.exit 2))
+
+;; ── inputs ──────────────────────────────────────────────────────────────────
+
+(defn- read-text [rel]
+  (let [p (path/join root rel)]
+    (when-not (fs/existsSync p) (refuse! (str rel " does not exist")))
+    (let [text (fs/readFileSync p "utf8")]
+      (when (str/blank? text) (refuse! (str rel " is empty")))
+      text)))
+
+(defn- strip-jsonc-comments
+  "Drop // and /* */ comments that are not inside a string literal.
+
+   Splitting on \"//\" without tracking strings would truncate this file at its
+   own `AGENTGATEWAY_MCP_ROUTER_URL` value, and the resulting object would
+   still be parseable JSON -- just missing bindings. That is precisely the
+   shape of failure this file exists to refuse, so it is worth the state
+   machine."
+  [text]
+  (let [n (count text)]
+    (loop [i 0, out [], in-str? false, esc? false]
+      (if (>= i n)
+        (str/join out)
+        (let [c  (nth text i)
+              c2 (when (< (inc i) n) (nth text (inc i)))]
+          (cond
+            in-str? (recur (inc i) (conj out c)
+                           (if esc? true (not= c \"))
+                           (and (not esc?) (= c \\)))
+            (= c \") (recur (inc i) (conj out c) true false)
+            (and (= c \/) (= c2 \/))
+            (let [nl (.indexOf text "\n" i)]
+              (if (neg? nl) (str/join out) (recur nl out false false)))
+            (and (= c \/) (= c2 \*))
+            (let [close (.indexOf text "*/" (+ i 2))]
+              (if (neg? close)
+                (refuse! (str wrangler-rel " has an unterminated /* block comment"))
+                (recur (+ close 2) out false false)))
+            :else (recur (inc i) (conj out c) false false)))))))
+
+(def wrangler
+  (let [text (strip-jsonc-comments (read-text wrangler-rel))]
+    (try
+      (js->clj (js/JSON.parse text))
+      (catch :default e
+        (refuse! (str wrangler-rel " is not readable JSON once comments are stripped: "
+                      (.-message e)))))))
+
+(def package-json
+  (let [text (read-text "package.json")]
+    (try
+      (js->clj (js/JSON.parse text))
+      (catch :default e
+        (refuse! (str "package.json is not readable JSON: " (.-message e)))))))
+
+(def app-src (read-text app-rel))
+(def shell (read-text shell-rel))
+
+(def shadow
+  (try
+    (reader/read-string (read-text shadow-rel))
+    (catch :default e
+      (refuse! (str shadow-rel " is not readable EDN: " (.-message e))))))
+
+(def default-db
+  (let [i (.indexOf app-src "(def default-db")]
+    (when (neg? i)
+      (refuse! (str app-rel " has no `(def default-db` form — this check reads the"
+                    " page's claims from there, and cannot guess where they moved")))
+    (let [form (try
+                 (reader/read-string (subs app-src i))
+                 (catch :default e
+                   (refuse! (str app-rel "'s default-db form is not readable EDN: "
+                                 (.-message e)))))]
+      (when-not (and (seq? form) (= 3 (count form)) (map? (nth form 2)))
+        (refuse! (str app-rel "'s `(def default-db ...)` is not a three-element form"
+                      " ending in a map literal; read as " (pr-str form))))
+      ;; The index above is a prefix match, so a renamed `default-db-v2` sitting
+      ;; where `default-db` used to be would be read as if it were the page state.
+      ;; Measured: without this line the rename mutation below returned 0.
+      (when-not (= (quote default-db) (second form))
+        (refuse! (str app-rel " has no `default-db`; the nearest def is "
+                      (pr-str (second form)))))
+      (nth form 2))))
+
+;; ── evidence floor ──────────────────────────────────────────────────────────
+;;
+;; Both list comparisons below are satisfied by two empty lists. Refuse first,
+;; so that a gutted config cannot report the same thing as an agreeing one.
+
+(when-not (map? wrangler) (refuse! (str wrangler-rel " is not a JSON object")))
+(when-not (seq (get wrangler "routes"))
+  (refuse! (str wrangler-rel " declares no routes — an empty list matches an empty"
+                " :app/routes, so there is nothing here to check")))
+(when-not (seq (get wrangler "vars"))
+  (refuse! (str wrangler-rel " declares no vars — an empty map matches an empty"
+                " :app/vars, so there is nothing here to check")))
+(when (empty? default-db)
+  (refuse! (str app-rel "'s default-db is empty")))
+
+;; ── 1. the page lists the routes and bindings this repo declares ────────────
+
+(def declared-routes
+  (mapv #(get % "pattern") (get wrangler "routes")))
+
+(when (some nil? declared-routes)
+  (refuse! (str wrangler-rel " has a route entry with no \"pattern\" key")))
+
+(let [shown (:app/routes default-db)]
+  (when-not (= (vec shown) declared-routes)
+    (fail! "routes-match-wrangler-patterns"
+           (str "the page lists " (pr-str shown) " but " wrangler-rel
+                " declares " (pr-str declared-routes)))))
+
+(let [shown (:app/routes default-db)
+      n     (:app/route-count default-db)]
+  (when-not (= n (count shown))
+    (fail! "route-count-matches-the-route-list"
+           (str "the page shows " (pr-str n) " as its route count next to a list of "
+                (count shown) " route(s): " (pr-str shown)))))
+
+(let [declared (vec (sort (keys (get wrangler "vars"))))
+      shown    (vec (:app/vars default-db))]
+  (when-not (= shown declared)
+    (fail! "vars-match-wrangler-var-keys"
+           (str "the page lists " (pr-str shown) " but " wrangler-rel
+                " declares " (pr-str declared)
+                ". Missing from the page: " (pr-str (vec (remove (set shown) declared)))
+                "; listed but not declared: " (pr-str (vec (remove (set declared) shown)))))))
+
+;; ── 2. the XRPC flag says whether a Worker script is deployed ───────────────
+;;
+;; `main` is what puts a script in front of the assets. Without it the config
+;; is assets-only and no XRPC method is reachable, which is exactly what
+;; :app/xrpc? false means -- see this repo's wrangler.jsonc header comment and
+;; app.cljs's namespace docstring, which both spell the reasoning out.
+
+(let [main-script (get wrangler "main")
+      deployed?   (boolean (and (string? main-script) (not (str/blank? main-script))))
+      shown       (:app/xrpc? default-db)]
+  (when-not (= (boolean shown) deployed?)
+    (fail! "xrpc-flag-matches-whether-a-worker-script-is-deployed"
+           (str "the page reports XRPC as " (if shown "enabled" "not configured")
+                " while " wrangler-rel
+                (if deployed?
+                  (str " declares main " (pr-str main-script))
+                  " declares no main, so nothing but the static assets is served")))))
+
+;; ── 3. the page's own source path names a file that is here ────────────────
+
+(let [rel (:app/relative-path default-db)]
+  (cond
+    (not (string? rel))
+    (fail! "relative-path-names-a-file-that-exists"
+           (str "the page shows " (pr-str rel) " as its source path, which is not a string"))
+
+    (not (fs/existsSync (path/join root rel)))
+    (fail! "relative-path-names-a-file-that-exists"
+           (str "the page shows " (pr-str rel)
+                " as its own source, and no such file exists in this repository"))))
+
+;; ── 4. the page names the package this repository publishes ────────────────
+
+(let [pkg    (get package-json "name")
+      bare   (str/replace (str pkg) #"^@[^/]+/" "")
+      name*  (:app/name default-db)
+      proj   (:app/project default-db)]
+  (when (str/blank? bare)
+    (refuse! "package.json has no \"name\""))
+  (doseq [[k shown] [[:app/name name*] [:app/project proj]]]
+    (when-not (= shown bare)
+      (fail! "app-name-matches-package-json"
+             (str "the page shows " k " = " (pr-str shown) " but package.json is named "
+                  (pr-str pkg) " (" (pr-str bare) " once the npm scope is dropped)")))))
+
+;; ── 5. the shell the Worker serves reaches the bundle shadow-cljs emits ────
+;;
+;; Assets-only means the browser gets index.html and whatever it asks for next.
+;; If the script tag and the module disagree, the request 404s silently and the
+;; page keeps showing its placeholder text; if the mount id and getElementById
+;; disagree, the bundle loads and renders into nothing. Neither shows up in a
+;; compile, and neither shows up in a re-frame unit test.
+
+(let [build      (get-in shadow [:builds :app])
+      asset-path (:asset-path build)
+      modules    (:modules build)
+      module     (first (keys modules))]
+  (cond
+    (not (map? build))
+    (refuse! (str shadow-rel " has no :builds :app map"))
+
+    (or (not (string? asset-path)) (str/blank? asset-path))
+    (refuse! (str shadow-rel "'s :app build declares no :asset-path"))
+
+    (or (not (map? modules)) (not= 1 (count modules)))
+    (refuse! (str shadow-rel "'s :app build declares " (count modules)
+                  " module(s); this check knows how to name the output of exactly one"))
+
+    :else
+    (let [expected (str asset-path "/" (name module) ".js")
+          srcs     (mapv second (re-seq #"<script[^>]*\ssrc=\"([^\"]+)\"" shell))]
+      (when-not (some #{expected} srcs)
+        (fail! "shell-loads-the-bundle-shadow-cljs-emits"
+               (str shell-rel " loads " (pr-str srcs) " but " shadow-rel
+                    " emits module " (pr-str module) " under :asset-path "
+                    (pr-str asset-path) ", i.e. " (pr-str expected)))))))
+
+(let [mounted (second (re-find #"\.getElementById\s+js/document\s+\"([^\"]+)\"" app-src))
+      ids     (mapv second (re-seq #"<div[^>]*\sid=\"([^\"]+)\"" shell))]
+  (cond
+    (nil? mounted)
+    (refuse! (str app-rel " has no `(.getElementById js/document \"…\")` call — this"
+                  " check cannot tell which element the app renders into"))
+
+    (not (some #{mounted} ids))
+    (fail! "shell-mount-point-matches-the-one-the-app-renders-into"
+           (str app-rel " renders into id " (pr-str mounted) " and " shell-rel
+                " has div ids " (pr-str ids)))))
+
+;; ── report ──────────────────────────────────────────────────────────────────
+
+(println (str "SCANNED\troutes=" (count declared-routes)
+              "\tvars=" (count (get wrangler "vars"))
+              "\tdefault-db-facts=" (count default-db)
+              "\tshell-bytes=" (count shell)))
+
+(if (seq @failures)
+  (do (doseq [f @failures] (println f))
+      (println (str "declared-surface-check: " (count @failures) " invariant(s) violated"))
+      (js/process.exit 1))
+  (do (println "declared-surface-check: OK")
+      (js/process.exit 0)))
