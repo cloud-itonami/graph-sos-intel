@@ -23,7 +23,7 @@
             "APP_PERFORMER_TYPE" "APP_UI_TYPE"]
            @(rf/subscribe [:app/vars])))
     (is (false? @(rf/subscribe [:app/xrpc?])))
-    (is (= "cljs/src/graph_sos_intel/app.cljs" @(rf/subscribe [:app/relative-path])))))
+    (is (= "cljs/src/graph_sos_intel/app.cljk" @(rf/subscribe [:app/relative-path])))))
 
 (deftest routes-sub-reflects-db
   (testing ":app/routes reads whatever is in the db, not a fixed value"

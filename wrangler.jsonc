@@ -5,7 +5,7 @@
   // client bundle (`assets.directory`, the +page.svelte status page). The
   // frontend was migrated to a plain ClojureScript (shadow-cljs + reagent +
   // re-frame + jp-go-dds) static bundle with no server-rendering step — see
-  // cljs/src/graph_sos_intel/app.cljs's namespace docstring. `main` is
+  // cljs/src/graph_sos_intel/app.cljk's namespace docstring. `main` is
   // dropped (a Cloudflare Worker can be assets-only) and `assets.directory`
   // now points at the cljs build output.
   //

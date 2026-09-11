@@ -82,7 +82,7 @@
               "APP_DISPLAY_NAME" "APP_EMBED_URL" "APP_FRAMEWORK" "APP_NANOID"
               "APP_PERFORMER_TYPE" "APP_UI_TYPE"]
    :app/xrpc? false
-   :app/relative-path "cljs/src/graph_sos_intel/app.cljs"})
+   :app/relative-path "cljs/src/graph_sos_intel/app.cljk"})
 
 (rf/reg-event-db
  :initialize-db
