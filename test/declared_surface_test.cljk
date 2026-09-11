@@ -1,4 +1,4 @@
-#!/usr/bin/env nbb
+#!/usr/bin/env kbb
 ;; test/declared_surface_test.cljk — does the status page still describe THIS
 ;; repository, or only the repository it was written against?
 ;;
@@ -68,7 +68,7 @@
 ;;
 ;; Nothing here touches the network, npm, a JVM, or a browser.
 ;;
-;; Usage:  nbb test/declared_surface_test.cljk
+;; Usage:  kbb --backend sci test/declared_surface_test.cljk
 
 (ns declared-surface-test
   (:require ["node:fs" :as fs]
