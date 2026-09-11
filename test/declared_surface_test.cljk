@@ -1,5 +1,5 @@
 #!/usr/bin/env nbb
-;; test/declared_surface_test.cljs — does the status page still describe THIS
+;; test/declared_surface_test.cljk — does the status page still describe THIS
 ;; repository, or only the repository it was written against?
 ;;
 ;; This Worker is assets-only. `wrangler.jsonc` declares no `main`, so nothing
@@ -9,14 +9,14 @@
 ;; and where its own source lives. Every one of those is a claim about a file
 ;; sitting next to it.
 ;;
-;; `cljs/src/graph_sos_intel/app.cljs`'s `default-db` holds those claims as
+;; `cljs/src/graph_sos_intel/app.cljk`'s `default-db` holds those claims as
 ;; literals, and its namespace docstring explains at length which ones were
 ;; corrected during the SvelteKit → ClojureScript migration and why -- the
 ;; Svelte constant it was ported from had drifted from `wrangler.jsonc` (it
 ;; still said `routeCount: 0`, `routes: []`, `vars: []` next to a config that
 ;; declared one route and nine vars). That drift is the failure this file is
 ;; here to catch the next time, because the existing suite structurally cannot:
-;; `cljs/test/graph_sos_intel/app_test.cljs` asserts `default-db` against the
+;; `cljs/test/graph_sos_intel/app_test.cljk` asserts `default-db` against the
 ;; same literals spelled a second time, so adding a var to `wrangler.jsonc`
 ;; leaves it green while the page starts lying. A test that restates the
 ;; implementation discriminates nothing.
@@ -68,7 +68,7 @@
 ;;
 ;; Nothing here touches the network, npm, a JVM, or a browser.
 ;;
-;; Usage:  nbb test/declared_surface_test.cljs
+;; Usage:  nbb test/declared_surface_test.cljk
 
 (ns declared-surface-test
   (:require ["node:fs" :as fs]
@@ -77,9 +77,9 @@
             [clojure.string :as str]))
 
 (def root
-  (path/resolve (path/dirname (or js/__filename "test/declared_surface_test.cljs")) ".."))
+  (path/resolve (path/dirname (or js/__filename "test/declared_surface_test.cljk")) ".."))
 
-(def app-rel "cljs/src/graph_sos_intel/app.cljs")
+(def app-rel "cljs/src/graph_sos_intel/app.cljk")
 (def shadow-rel "cljs/shadow-cljs.edn")
 (def wrangler-rel "wrangler.jsonc")
 (def shell-rel "cljs/public/index.html")
